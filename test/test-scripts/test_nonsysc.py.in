@@ -1,0 +1,59 @@
+#!/usr/bin/python3
+
+##############################################################################
+#                                                                            #
+# Copyright (C) 2026 MachineWare GmbH                                        #
+# All Rights Reserved                                                        #
+#                                                                            #
+# This work is licensed under the terms described in the LICENSE file found  #
+# in the root directory of this source tree.                                 #
+#                                                                            #
+##############################################################################
+
+import sys
+
+from pexpect.popen_spawn import PopenSpawn
+
+
+def gdb_repl(func):
+    def wrap():
+        func()
+        p.expect_exact("(gdb) ")
+
+    return wrap
+
+
+@gdb_repl
+def test_scgdb_init():
+    p.sendline("python")
+    p.sendline("import sys")
+    p.sendline('sys.path.append("@SCGDB_ROOT@")')
+    p.sendline("end")
+    p.sendline("source @SCGDB_ROOT@/gdbinit.py")
+    p.expect("=== SystemC GDB extensions enabled ===")
+    print("\n*** scgdb successfully loaded ***")
+
+@gdb_repl
+def test_run_debugee():
+    p.sendline("run")
+    p.expect_exact("Hello world!")
+    p.expect("exited normally")
+    print("\n*** debugee ran successfully ***")
+
+
+cmd = "gdb $<TARGET_FILE:hello-world>"
+print("\n*** Command ***")
+print(cmd)
+
+p = PopenSpawn(cmd, logfile=sys.stdout, encoding="utf-8")
+
+p.expect_exact("(gdb) ")
+test_scgdb_init()
+test_run_debugee()
+p.sendeof()
+exit_code = p.wait()
+if exit_code == 0:
+    print("\n*** gdb exited successfully ***")
+else:
+    print(f"\n *** error during gdb exit ({exit_code}) ***")
+    exit(255)

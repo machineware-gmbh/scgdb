@@ -1,0 +1,88 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '0 20 * * *'
+
+jobs:
+  build:
+    runs-on: ${{matrix.os}}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        systemc: [2.3.3]
+        os: [ubuntu-22.04, ubuntu-24.04]
+        target-arch: [linux64]
+        include:
+          - systemc: 2.3.3
+            os: ubuntu-22.04-arm
+            target-arch: linuxaarch64
+          - systemc: 2.3.3
+            os: ubuntu-24.04-arm
+            target-arch: linuxaarch64
+          - systemc: 3.0.0
+            os: ubuntu-26.04
+            target-arch: linux64
+          - systemc: 3.0.0
+            os: ubuntu-26.04-arm
+            target-arch: linuxaarch64
+          - systemc: 3.0.1
+            os: ubuntu-26.04
+            target-arch: linux64
+          - systemc: 3.0.1
+            os: ubuntu-26.04-arm
+            target-arch: linuxaarch64
+          - systemc: 3.0.2
+            os: ubuntu-26.04
+            target-arch: linux64
+          - systemc: 3.0.2
+            os: ubuntu-26.04-arm
+            target-arch: linuxaarch64
+
+    name: SystemC ${{matrix.systemc}} (${{matrix.os}})
+
+    env:
+      SYSTEMC_HOME: ${{github.workspace}}/tmp/systemc/${{matrix.systemc}}
+      TARGET_ARCH: ${{matrix.target-arch}}
+      SYSTEMC_VERSION: ${{matrix.systemc}}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+      with:
+        submodules: 'recursive'
+
+    - name: Restore SystemC cache
+      id: cache-systemc
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{github.workspace}}/tmp/systemc
+        key: cache-systemc-${{matrix.systemc}}-${{runner.arch}}-${{matrix.os}}
+
+    - name: Download SystemC
+      if: steps.cache-systemc.outputs.cache-hit != 'true'
+      run: ./test/setup-systemc.sh -p ${{github.workspace}}/tmp -v ${{matrix.systemc}} -d
+
+    - name: Save SystemC cache
+      if: steps.cache-systemc.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{github.workspace}}/tmp/systemc
+        key: cache-systemc-${{matrix.systemc}}-${{runner.arch}}-${{matrix.os}}
+
+    - name: Setup dependencies
+      run: |
+        sudo apt-get update -y -qq
+        sudo apt-get install gdb libstdc++6
+
+    - name: Configure
+      run: |
+        cmake -G Ninja -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=DEBUG -DVCML_UNITY_BUILD=ON test/
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest --output-on-failure

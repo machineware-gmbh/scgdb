@@ -1,0 +1,157 @@
+#!/usr/bin/python3
+
+##############################################################################
+#                                                                            #
+# Copyright (C) 2026 MachineWare GmbH                                        #
+# All Rights Reserved                                                        #
+#                                                                            #
+# This work is licensed under the terms described in the LICENSE file found  #
+# in the root directory of this source tree.                                 #
+#                                                                            #
+##############################################################################
+
+import os
+import signal
+import sys
+
+from pexpect.popen_spawn import PopenSpawn
+
+
+def gdb_repl(func):
+    def wrap():
+        func()
+        p.expect_exact("(gdb) ")
+
+    return wrap
+
+
+@gdb_repl
+def test_scgdb_init():
+    p.sendline("python")
+    p.sendline("import sys")
+    p.sendline('sys.path.append("@SCGDB_ROOT@")')
+    p.sendline("end")
+    p.sendline("source @SCGDB_ROOT@/gdbinit.py")
+    p.expect("=== SystemC GDB extensions enabled ===")
+    print("\n*** scgdb successfully loaded ***")
+
+
+@gdb_repl
+def test_sigint():
+    p.sendline("run")
+    p.expect(r"\n4\n$")
+    p.kill(signal.SIGINT)
+    p.expect_exact("Program received signal SIGINT, Interrupt.")
+    print("\n*** successfully interrupted ***")
+
+
+@gdb_repl
+def test_print_selected_th_none():
+    p.sendline("sc thread")
+    p.expect_exact("No SC_THREAD selected")
+    print("\n*** received expected `sc thread` output (selected thread: None) ***")
+
+
+@gdb_repl
+def test_select_scthread_0():
+    p.sendline("sc thread 0")
+    p.expect_exact("[Selecting SC_THREAD 0 (fizzbuzz.thread_buzz)]")
+    print("\n*** received expected `sc thread 0` output ***")
+
+
+@gdb_repl
+def test_print_selected_th_0():
+    p.sendline("sc thread")
+    p.expect_exact("[Current SC_THREAD is 0 (fizzbuzz.thread_buzz)]")
+    print("\n*** received expected `sc thread` output (selected thread: 0) ***")
+
+
+@gdb_repl
+def test_bt_scthread():
+    arch = os.environ["TARGET_ARCH"]
+    if arch == "linux64":
+        test_bt_scthread_x86_64()
+    elif arch == "linuxaarch64":
+        test_bt_scthread_aarch64()
+    else:
+        raise Exception(f"Unknown architecture! ({arch})")
+
+
+def test_bt_scthread_x86_64():
+    p.sendline("sc backtrace")
+    p.expect("qt_blocki")
+    if os.environ["SYSTEMC_VERSION"] == "2.3.0a":
+        p.expect("sc_core::sc_cor_pkg_qt::yield")
+    p.expect("sc_core::sc_thread_process::suspend_me")
+    p.expect("sc_core::sc_thread_process::wait")
+    p.expect("sc_core::wait")
+    p.expect("sc_core::sc_module::wait")
+    p.expect("fizzbuzz_module::thread_buzz")
+    p.expect("sc_core::sc_process_b::semantics")
+    p.expect("sc_core::sc_thread_cor_fn")
+    if os.environ["SYSTEMC_VERSION"] == "2.3.0a":
+        p.expect("sc_core::sc_cor_qt_wrapper")
+    else:
+        p.expect("qt_blocki")
+    print("\n*** received expected `sc backtrace` output ***")
+
+
+def test_bt_scthread_aarch64():
+    p.sendline("sc backtrace")
+    p.expect("qt_blocki")
+    p.expect("sc_core::sc_cor_pkg_qt::yield")
+    p.expect("sc_core::sc_thread_process::suspend_me")
+    p.expect("sc_core::sc_thread_process::wait")
+    p.expect("sc_core::wait")
+    p.expect("sc_core::sc_module::wait")
+    p.expect("fizzbuzz_module::thread_buzz")
+    p.expect("sc_core::sc_process_b::semantics")
+    p.expect("sc_core::sc_thread_cor_fn")
+    if os.environ["SYSTEMC_VERSION"].startswith("2"): # < SystemC 3.0.0
+        p.expect("sc_core::sc_cor_qt_wrapper")
+        p.expect("sc_core::sc_process_b::start_unwinding")
+    elif os.environ["SYSTEMC_VERSION"] == "3.0.0":
+        p.expect("sc_core::sc_phash_elem::operator delete")
+    else: # > SystemC 3.0.0
+        p.expect("sc_core::sc_cor_qt_wrapper")
+    print("\n*** received expected `sc backtrace` output ***")
+
+
+@gdb_repl
+def test_select_active_scthread():
+    p.sendline("sc thread 2")
+    p.expect_exact("[Selecting SC_THREAD 2 (fizzbuzz.thread_main)]")
+    p.expect_exact("Warning: this SC_THREAD is the active coroutine")
+    print("\n*** received expected warning when selecting the active SC_THREAD ***")
+
+
+@gdb_repl
+def test_bt_active_scthread():
+    p.sendline("sc backtrace")
+    p.expect_exact("SC_THREAD 2 (fizzbuzz.thread_main) is the active coroutine")
+    print("\n*** received expected error for `sc backtrace` on the active SC_THREAD ***")
+
+
+cmd = "gdb $<TARGET_FILE:fizzbuzz>"
+print("\n*** Command ***")
+print(cmd)
+
+p = PopenSpawn(cmd, logfile=sys.stdout, encoding="utf-8")
+
+p.expect_exact("(gdb) ")
+test_scgdb_init()
+test_sigint()
+test_print_selected_th_none()
+test_select_scthread_0()
+test_print_selected_th_0()
+test_bt_scthread()
+test_select_active_scthread()
+test_bt_active_scthread()
+
+p.sendeof()
+exit_code = p.wait()
+if exit_code == 0:
+    print("\n*** gdb exited successfully ***")
+else:
+    print(f"\n *** error during gdb exit ({exit_code}) ***")
+    exit(255)

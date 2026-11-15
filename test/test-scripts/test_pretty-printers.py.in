@@ -1,0 +1,91 @@
+#!/usr/bin/python3
+
+##############################################################################
+#                                                                            #
+# Copyright (C) 2026 MachineWare GmbH                                        #
+# All Rights Reserved                                                        #
+#                                                                            #
+# This work is licensed under the terms described in the LICENSE file found  #
+# in the root directory of this source tree.                                 #
+#                                                                            #
+##############################################################################
+
+import sys
+import re
+
+from PrinterExpOutput import TEST_SEQUENCE
+from pexpect.popen_spawn import PopenSpawn
+from pexpect.exceptions import TIMEOUT
+
+
+def gdb_repl(func):
+    def wrap(*args, **kwargs):
+        func(*args, **kwargs)
+        p.expect_exact("(gdb) ")
+
+    return wrap
+
+
+@gdb_repl
+def test_scgdb_init():
+    p.sendline("python")
+    p.sendline("import sys")
+    p.sendline('sys.path.append("@SCGDB_ROOT@")')
+    p.sendline("end")
+    p.sendline("source @SCGDB_ROOT@/gdbinit.py")
+    p.expect("=== SystemC GDB extensions enabled ===")
+    print("\n*** scgdb successfully loaded ***")
+
+
+@gdb_repl
+def test_pretty_printer(test):
+    p.sendline(f"p {test['name']}")
+    try:
+        p.expect(re.escape(test["expOutput"]))
+    except TIMEOUT as e:
+        print(f"""
+
+*** {test['name']}: TIMEOUT ***
+Expected output: {test['expOutput']}
+
+{e}
+
+        """, file=sys.stderr)
+        sys.exit("TIMEOUT")
+
+    print(f"\n*** {test['name']}: OK ***")
+
+
+@gdb_repl
+def set_breakpoint():
+    p.sendline("b sc_main")
+    p.expect_exact("Breakpoint 1 at ")
+
+
+@gdb_repl
+def run_program():
+    p.sendline("r")
+    p.expect_exact("Breakpoint 1, sc_main")
+
+
+cmd = "gdb $<TARGET_FILE:pretty-printers>"
+print("\n*** Command ***")
+print(cmd)
+
+p = PopenSpawn(cmd, logfile=sys.stdout, encoding="utf-8")
+
+p.expect_exact("(gdb) ")
+test_scgdb_init()
+set_breakpoint()
+run_program()
+
+for test in TEST_SEQUENCE:
+    test_pretty_printer(test)
+
+p.sendeof()
+exit_code = p.wait()
+if exit_code == 0:
+    print("\n*** gdb exited successfully ***")
+else:
+    print(f"\n *** error during gdb exit ({exit_code}) ***")
+    exit(255)

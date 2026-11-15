@@ -1,0 +1,11 @@
+extend-exclude = ["test/format.py"]
+
+[lint]
+extend-ignore = [
+    "N999" # Ignore CamelCase module names
+]
+
+[lint.per-file-ignores]
+# Ignore unused import error, as they are indeed used by GDB
+"__init__.py" = ["F401"]
+"gdbinit.py" = ["F401"]

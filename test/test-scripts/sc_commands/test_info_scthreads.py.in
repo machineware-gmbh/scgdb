@@ -1,0 +1,73 @@
+#!/usr/bin/python3
+
+##############################################################################
+#                                                                            #
+# Copyright (C) 2026 MachineWare GmbH                                        #
+# All Rights Reserved                                                        #
+#                                                                            #
+# This work is licensed under the terms described in the LICENSE file found  #
+# in the root directory of this source tree.                                 #
+#                                                                            #
+##############################################################################
+
+import signal
+import sys
+
+from pexpect.popen_spawn import PopenSpawn
+
+
+def gdb_repl(func):
+    def wrap():
+        func()
+        p.expect_exact("(gdb) ")
+
+    return wrap
+
+
+@gdb_repl
+def test_scgdb_init():
+    p.sendline("python")
+    p.sendline("import sys")
+    p.sendline('sys.path.append("@SCGDB_ROOT@")')
+    p.sendline("end")
+    p.sendline("source @SCGDB_ROOT@/gdbinit.py")
+    p.expect("=== SystemC GDB extensions enabled ===")
+    print("\n*** scgdb successfully loaded ***")
+
+
+@gdb_repl
+def test_sigint():
+    p.sendline("run")
+    p.expect(r"\n4\n$")
+    p.kill(signal.SIGINT)
+    p.expect_exact("Program received signal SIGINT, Interrupt.")
+    print("\n*** successfully interrupted ***")
+
+
+@gdb_repl
+def test_info_scthread():
+    p.sendline("info scthreads")
+    p.expect("0:\tfizzbuzz\\.thread_buzz \\(sp: 0x[a-f,0-9]*\\)")
+    p.expect("1:\tfizzbuzz\\.thread_fizz \\(sp: 0x[a-f,0-9]*\\)")
+    p.expect("\\* 2:\tfizzbuzz\\.thread_main \\(sp: 0x[a-f,0-9]*\\)")
+    print("\n*** received expected info scthreads output ***")
+
+
+cmd = "gdb $<TARGET_FILE:fizzbuzz>"
+print("\n*** Command ***")
+print(cmd)
+
+p = PopenSpawn(cmd, logfile=sys.stdout, encoding="utf-8")
+
+
+p.expect_exact("(gdb) ")
+test_scgdb_init()
+test_sigint()
+test_info_scthread()
+p.sendeof()
+exit_code = p.wait()
+if exit_code == 0:
+    print("\n*** gdb exited successfully ***")
+else:
+    print(f"\n *** error during gdb exit ({exit_code}) ***")
+    exit(255)

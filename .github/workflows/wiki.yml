@@ -1,0 +1,35 @@
+name: wiki
+
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'test/test-scripts/PrinterExpOutput.py'
+
+jobs:
+  upd-wiki:
+    runs-on: ubuntu-slim
+    name: Publish expected pretty-printer output to wiki
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout wiki repo
+        uses: actions/checkout@v7
+        with:
+          repository: machineware-gmbh/scgdb.wiki
+          path: wiki
+
+      - name: Generate file
+        run: python3 -c "import sys; sys.path.insert(1, 'test/test-scripts'); import PrinterExpOutput; PrinterExpOutput.export_expected_output('wiki/Expected-pretty-printer-output.md')"
+
+      - name: Commit and Push to wiki repo
+        working-directory: wiki
+        run: |
+            git config --local user.email "actions@github.com"
+            git config --local user.name "GitHub Actions"
+            if git commit -am "Update Expected-pretty-printer-output.md"; then
+                git push origin master;
+            fi
